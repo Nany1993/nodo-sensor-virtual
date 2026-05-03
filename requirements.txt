@@ -1,0 +1,9 @@
+CounterFit
+counterfit-connection
+counterfit-shims-seeed-python-dht
+# CounterFit trae Flask 2.1; Werkzeug 3 rompe la importación (url_quote).
+werkzeug>=2.3,<3
+tqdm>=4.66
+# Visualización de resultados (notebook Graficos_Resultados.ipynb)
+pandas>=2.0
+matplotlib>=3.7
