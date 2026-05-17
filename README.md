@@ -161,9 +161,91 @@ Las figuras pueden exportarse como PNG en `figuras_informe/` ejecutando la últi
 
 El script `nodo_mqtt.py` extiende el nodo sensor para enviar cada lectura a **Adafruit IO** en tiempo real mediante **MQTT**, además de seguir persistiendo en SQLite.
 
-### Configuración rápida
+---
 
-1. Crear cuenta en [io.adafruit.com](https://io.adafruit.com) y dos feeds: `temperatura` y `humedad`.
+### Protocolo de comunicación: MQTT
+
+**MQTT** (*Message Queuing Telemetry Transport*) es un protocolo de mensajería ligero diseñado específicamente para entornos IoT donde los dispositivos tienen recursos limitados y la red puede ser inestable o de baja velocidad.
+
+#### ¿Cómo funciona?
+
+MQTT opera bajo un modelo **publicar / suscribir** (*publish / subscribe*) que desacopla al emisor del receptor:
+
+```
+[Nodo sensor]  --publica-->  [Broker MQTT]  --distribuye-->  [Dashboard / App]
+  (publisher)                (io.adafruit.com)                  (subscriber)
+```
+
+1. El **broker** actúa como intermediario central: recibe los mensajes y los reenvía a todos los suscriptores interesados.
+2. El **publicador** (*publisher*) envía un valor a un **topic** (tema), que funciona como una dirección lógica. En este proyecto los topics son:
+   - `NANY1993/feeds/temperatura`
+   - `NANY1993/feeds/humedad`
+3. El **suscriptor** (*subscriber*) —en este caso Adafruit IO— escucha esos topics y actualiza el dashboard en tiempo real.
+
+#### Conceptos clave
+
+| Concepto | Descripción |
+|---|---|
+| **Broker** | Servidor intermediario que enruta los mensajes. Aquí: `io.adafruit.com:1883` |
+| **Topic** | Cadena jerárquica que identifica un canal de datos (ej. `usuario/feeds/temperatura`) |
+| **QoS 0** | *At most once* — el mensaje se envía una vez sin confirmación. Suficiente para telemetría continua |
+| **Keepalive** | Intervalo (60 s) en que el cliente confirma que sigue activo al broker |
+| **Payload** | El valor transmitido; en este proyecto es un número flotante en formato texto |
+| **`loop_start()`** | Hilo de fondo que mantiene la conexión MQTT activa mientras el script captura datos |
+
+#### ¿Por qué MQTT y no HTTP o CoAP?
+
+| Protocolo | Peso | Modelo | Ideal para |
+|---|---|---|---|
+| **MQTT** | Muy ligero | Pub/Sub — persistente | Telemetría IoT continua, sensores |
+| HTTP | Medio | Request/Response | APIs REST, integración web |
+| CoAP | Ligero | Request/Response | Redes con UDP, sensores muy restringidos |
+
+MQTT es la elección estándar para sensores que envían datos de forma continua porque mantiene una sola conexión TCP abierta y el overhead por mensaje es mínimo (~2 bytes de cabecera fija).
+
+---
+
+### Configuración del sistema de transmisión
+
+#### Rol del microcontrolador
+
+La actividad requiere un microcontrolador (ESP32, ESP8266, u otro). En esta implementación el **PC actúa como nodo IoT**, simulando exactamente el rol que cumpliría un ESP32:
+
+| Aspecto | ESP32 físico | Este proyecto (PC virtual) |
+|---|---|---|
+| Sensor | DHT11 conectado por GPIO | DHT11 virtual en CounterFit |
+| Protocolo | MQTT vía `PubSubClient` (Arduino) | MQTT vía `paho-mqtt` (Python) |
+| Red | Wi-Fi integrado | Wi-Fi del PC |
+| Broker | `io.adafruit.com` | `io.adafruit.com` (idéntico) |
+| Plataforma | Adafruit IO | Adafruit IO (idéntico) |
+
+La lógica de comunicación, el protocolo y la integración con la plataforma son **exactamente iguales** a los de un dispositivo físico.
+
+#### Tipo de red utilizada
+
+**Wi-Fi (IEEE 802.11)** sobre TCP/IP. El PC se conecta a Internet a través de la red doméstica y establece una conexión TCP persistente con el broker `io.adafruit.com` en el puerto **1883**.
+
+#### Plataforma de monitoreo: Adafruit IO
+
+[Adafruit IO](https://io.adafruit.com) es una plataforma IoT en la nube que ofrece:
+- **Feeds**: canales de datos donde llegan los valores publicados vía MQTT.
+- **Dashboards**: paneles visuales configurables con bloques *Line Chart*, *Gauge*, *Toggle*, etc.
+- **Historial**: almacena automáticamente cada valor recibido con su timestamp.
+- **API REST y MQTT**: accesibles con usuario y AIO Key.
+
+#### Credenciales y seguridad
+
+Las credenciales (usuario y AIO Key) se almacenan en un archivo **`.env`** local que **no se sube a GitHub** (incluido en `.gitignore`). El script las carga en tiempo de ejecución con `python-dotenv`.
+
+```
+# .env  (nunca versionar este archivo)
+AIO_USERNAME=tu_usuario
+AIO_KEY=aio_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+#### Configuración rápida
+
+1. Crear cuenta en [io.adafruit.com](https://io.adafruit.com) y dos feeds con nombres exactos: `temperatura` y `humedad`.
 2. Copiar las credenciales al archivo `.env`:
 
 ```powershell
@@ -177,7 +259,67 @@ copy .env.example .env
 python nodo_mqtt.py --simulate --samples 6 --interval-sec 5
 ```
 
-Ver `Propuesta_Actividad2_MQTT.md` para la guía completa, incluyendo el guion sugerido para el video.
+#### Opciones de `nodo_mqtt.py`
+
+| Argumento | Descripción | Por defecto |
+|---|---|---|
+| `--simulate` | Valores sintéticos, sin CounterFit | — |
+| `--interval-sec` | Segundos entre muestras | `30` |
+| `--samples` | Total de lecturas | `360` |
+| `--db` | Ruta del archivo SQLite | `nodo_mqtt.db` |
+| `--no-mqtt` | Deshabilitar envío MQTT (solo SQLite) | — |
+| `--no-progress` | Desactivar barra de progreso | — |
+
+---
+
+### Resultados obtenidos
+
+#### Flujo de implementación
+
+```
+CounterFit (sensor DHT11 virtual)
+        │  hum, temp
+        ▼
+nodo_mqtt.py  ──┬──► SQLite  (nodo_mqtt.db)       persistencia local
+                │
+                └──► paho-mqtt
+                          │  TCP/Wi-Fi
+                          ▼
+                  Broker: io.adafruit.com:1883
+                          │
+                          ├──► feed: NANY1993/feeds/temperatura
+                          └──► feed: NANY1993/feeds/humedad
+                                        │
+                                        ▼
+                              Dashboard Adafruit IO
+                          (visualización en tiempo real)
+```
+
+#### Comportamiento del sistema
+
+Cada lectura genera en consola una línea de la forma:
+
+```
+[3/20] 2026-05-16T19:17:46  T=22.53C  HR=60.23%  -> MQTT OK
+```
+
+Indicando: número de muestra, timestamp ISO 8601, valores de temperatura y humedad, y confirmación de publicación MQTT exitosa.
+
+#### Verificación en Adafruit IO
+
+Al ejecutar el script, los feeds `temperatura` y `humedad` reciben los valores en tiempo real y los grafican automáticamente en el dashboard. Cada punto en la gráfica corresponde a una muestra capturada y transmitida por el nodo.
+
+#### Prueba de conectividad realizada
+
+```
+Muestras enviadas : 20 lecturas × intervalo 10 s
+Duración          : ~3.5 minutos
+Protocolo         : MQTT sobre Wi-Fi (TCP puerto 1883)
+Broker            : io.adafruit.com
+Estado final      : 20/20 lecturas con "MQTT OK" — 0 errores
+```
+
+Ver `Propuesta_Actividad2_MQTT.md` para la guía completa y el guion del video de 6 minutos.
 
 ---
 
