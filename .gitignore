@@ -1,3 +1,6 @@
+# Credenciales — NUNCA versionar
+.env
+
 # Entorno virtual
 .venv/
 venv/

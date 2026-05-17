@@ -36,7 +36,7 @@ El sistema está compuesto por tres componentes principales:
 
 ```powershell
 # 1. Clonar el repositorio
-git clone https://github.com/<usuario>/nodo-sensor-virtual.git
+git clone https://github.com/Nany1993/nodo-sensor-virtual.git
 cd nodo-sensor-virtual
 
 # 2. Crear entorno virtual con Python 3.11
@@ -157,18 +157,45 @@ Las figuras pueden exportarse como PNG en `figuras_informe/` ejecutando la últi
 
 ---
 
+## Actividad 2 — Transmisión MQTT a Adafruit IO
+
+El script `nodo_mqtt.py` extiende el nodo sensor para enviar cada lectura a **Adafruit IO** en tiempo real mediante **MQTT**, además de seguir persistiendo en SQLite.
+
+### Configuración rápida
+
+1. Crear cuenta en [io.adafruit.com](https://io.adafruit.com) y dos feeds: `temperatura` y `humedad`.
+2. Copiar las credenciales al archivo `.env`:
+
+```powershell
+copy .env.example .env
+# Editar .env con tu AIO_USERNAME y AIO_KEY
+```
+
+3. Probar con modo simulado (sin CounterFit):
+
+```powershell
+python nodo_mqtt.py --simulate --samples 6 --interval-sec 5
+```
+
+Ver `Propuesta_Actividad2_MQTT.md` para la guía completa, incluyendo el guion sugerido para el video.
+
+---
+
 ## Estructura del repositorio
 
 ```
 nodo-sensor-virtual/
-├── nodo_sensor.py                   # Script principal de captura
+├── nodo_sensor.py                   # Actividad 1: captura → SQLite
+├── nodo_mqtt.py                     # Actividad 2: captura → SQLite + MQTT
 ├── init_db.py                       # Creación inicial de la BD
 ├── export_lecturas_csv.py           # Exportación a CSV
 ├── requirements.txt                 # Dependencias Python
+├── .env.example                     # Plantilla de credenciales MQTT
 ├── Graficos_Resultados.ipynb        # Notebook de análisis y visualización
-├── Guia_Actividad_3_horas.ipynb     # Guía paso a paso de la actividad
-├── Informe_Practica_Nodo_Sensor.md  # Borrador del informe
-├── Propuesta_Nodo_Sensor_Virtual.md # Propuesta y planificación
+├── Guia_Actividad_3_horas.ipynb     # Guía paso a paso de la actividad 1
+├── Informe_Practica_Nodo_Sensor.md  # Borrador del informe (Actividad 1)
+├── Propuesta_Nodo_Sensor_Virtual.md # Propuesta y planificación (Actividad 1)
+├── Propuesta_Actividad2_MQTT.md     # Propuesta y planificación (Actividad 2)
 └── .gitignore
 ```
 
@@ -184,3 +211,5 @@ nodo-sensor-virtual/
 | tqdm | >=4.66 | Barra de progreso en consola |
 | pandas | >=2.0 | Análisis de datos en el notebook |
 | matplotlib | >=3.7 | Visualizaciones en el notebook |
+| paho-mqtt | >=1.6,<3 | Cliente MQTT para Adafruit IO (Actividad 2) |
+| python-dotenv | >=1.0 | Carga de credenciales desde `.env` (Actividad 2) |
