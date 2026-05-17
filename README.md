@@ -72,9 +72,11 @@ Abrir el navegador en `http://127.0.0.1:5000`.
    - Units: **Percentage**
    - Pin: **5**
 2. Clic en **Add**
-3. En la tarjeta que aparece, marcar la casilla **Random**
-4. Escribir **Min: 40** y **Max: 90**
-5. Clic en **Set** ← **obligatorio después de cada cambio**
+3. En la tarjeta que aparece:
+   - Escribir `65` en el campo **Value** ← **obligatorio, no dejar vacío**
+   - Marcar la casilla **Random**
+   - Escribir **Min: 40** y **Max: 90**
+4. Clic en **Set**
 
 ### Paso 3 — Crear el sensor de Temperatura
 
@@ -83,11 +85,15 @@ Abrir el navegador en `http://127.0.0.1:5000`.
    - Units: **Celsius**
    - Pin: **6**
 2. Clic en **Add**
-3. En la tarjeta que aparece, marcar la casilla **Random**
-4. Escribir **Min: 18** y **Max: 35**
-5. Clic en **Set** ← **obligatorio después de cada cambio**
+3. En la tarjeta que aparece:
+   - Escribir `25` en el campo **Value** ← **obligatorio, no dejar vacío**
+   - Marcar la casilla **Random**
+   - Escribir **Min: 18** y **Max: 35**
+4. Clic en **Set**
 
-> **Regla crítica de CounterFit:** Cualquier cambio (activar Random, modificar Min/Max, cambiar valor fijo) **no tiene efecto hasta que hagas clic en Set**. Si olvidas este paso, CounterFit seguirá reportando el valor anterior y el script recibirá siempre el mismo número.
+> **Bug conocido de CounterFit:** si el campo *Value* está vacío al hacer clic en *Set*, CounterFit falla silenciosamente y el modo Random **no se activa**. El sensor seguirá reportando el valor anterior. Solución: siempre escribe un número válido en *Value* antes de hacer clic en *Set*, incluso cuando Random está activado. El número del campo *Value* no afecta la operación aleatoria — solo es necesario para que el servidor lo acepte.
+
+> **Regla crítica de CounterFit:** Cualquier cambio (activar Random, modificar Min/Max, cambiar valor fijo) **no tiene efecto hasta que hagas clic en Set**.
 
 ### Tabla de configuración de referencia
 
@@ -416,10 +422,12 @@ counterfit
 
 Abrir `http://127.0.0.1:5000` y crear los sensores:
 
-| Paso | Sensor | Type | Units | Pin | Random | Min | Max | Acción final |
-|------|--------|------|-------|-----|--------|-----|-----|--------------|
-| 1 | Humedad | Humidity | Percentage | 5 | ✅ | 40 | 90 | **Set** |
-| 2 | Temperatura | Temperature | Celsius | 6 | ✅ | 18 | 35 | **Set** |
+| Paso | Sensor | Type | Units | Pin | Value | Random | Min | Max | Acción final |
+|------|--------|------|-------|-----|-------|--------|-----|-----|--------------|
+| 1 | Humedad | Humidity | Percentage | 5 | **65** | ✅ | 40 | 90 | **Set** |
+| 2 | Temperatura | Temperature | Celsius | 6 | **25** | ✅ | 18 | 35 | **Set** |
+
+> **Crítico:** El campo *Value* NO puede estar vacío al hacer clic en *Set*. Si está vacío, CounterFit falla silenciosamente y Random no se activa.
 
 > Verificar que la consola de la Terminal 1 muestre `CounterFit - virtual IoT hardware running on port 5000`
 
