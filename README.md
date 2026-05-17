@@ -53,21 +53,48 @@ pip install -r requirements.txt
 
 ## Configuración de CounterFit
 
-1. En una terminal con el entorno activo, ejecutar el simulador:
+> **Importante:** Los sensores de CounterFit **no se guardan entre sesiones**. Cada vez que reinicias CounterFit debes crearlos de nuevo siguiendo estos pasos.
 
-    ```powershell
-    counterfit
-    ```
+### Paso 1 — Arrancar el simulador
 
-2. Abrir `http://127.0.0.1:5000` en el navegador.
-3. Crear dos sensores en la pestaña **Sensors**:
+```powershell
+cd "ruta\al\proyecto"
+.\.venv\Scripts\Activate.ps1
+counterfit
+```
 
-    | Sensor      | Tipo        | Unidades   | Pin GPIO virtual |
-    |-------------|-------------|------------|-----------------|
-    | Humedad     | Humidity    | Percentage | **5**           |
-    | Temperatura | Temperature | Celsius    | **6**           |
+Abrir el navegador en `http://127.0.0.1:5000`.
 
-4. Ajustar los valores manualmente (**Set**) o activar el modo **Random** con límites definidos (p. ej. Min: 15, Max: 35 para temperatura).
+### Paso 2 — Crear el sensor de Humedad
+
+1. En el panel **Create sensor**:
+   - Sensor Type: **Humidity**
+   - Units: **Percentage**
+   - Pin: **5**
+2. Clic en **Add**
+3. En la tarjeta que aparece, marcar la casilla **Random**
+4. Escribir **Min: 40** y **Max: 90**
+5. Clic en **Set** ← **obligatorio después de cada cambio**
+
+### Paso 3 — Crear el sensor de Temperatura
+
+1. En el panel **Create sensor**:
+   - Sensor Type: **Temperature**
+   - Units: **Celsius**
+   - Pin: **6**
+2. Clic en **Add**
+3. En la tarjeta que aparece, marcar la casilla **Random**
+4. Escribir **Min: 18** y **Max: 35**
+5. Clic en **Set** ← **obligatorio después de cada cambio**
+
+> **Regla crítica de CounterFit:** Cualquier cambio (activar Random, modificar Min/Max, cambiar valor fijo) **no tiene efecto hasta que hagas clic en Set**. Si olvidas este paso, CounterFit seguirá reportando el valor anterior y el script recibirá siempre el mismo número.
+
+### Tabla de configuración de referencia
+
+| Sensor      | Tipo        | Unidades   | Pin | Random | Min | Max |
+|-------------|-------------|------------|-----|--------|-----|-----|
+| Humedad     | Humidity    | Percentage | **5** | ✅ | 40 | 90 |
+| Temperatura | Temperature | Celsius    | **6** | ✅ | 18 | 35 |
 
 > **No es necesario configurar actuadores.** El alcance del nodo es exclusivamente lectura y registro.
 
@@ -339,6 +366,104 @@ nodo-sensor-virtual/
 ├── Propuesta_Nodo_Sensor_Virtual.md # Propuesta y planificación (Actividad 1)
 ├── Propuesta_Actividad2_MQTT.md     # Propuesta y planificación (Actividad 2)
 └── .gitignore
+```
+
+---
+
+## Reproducir el experimento completo desde cero
+
+Guía paso a paso para correr el sistema en cualquier computador nuevo.
+
+### Requisitos previos
+
+- Windows 10/11 con Python 3.11 instalado ([python.org](https://www.python.org/downloads/release/python-3110/))
+- Conexión a Internet (para MQTT → Adafruit IO)
+- Cuenta en [io.adafruit.com](https://io.adafruit.com) con feeds `temperatura` y `humedad` creados
+
+### 1. Clonar el repositorio
+
+```powershell
+git clone https://github.com/Nany1993/nodo-sensor-virtual.git
+cd nodo-sensor-virtual
+```
+
+### 2. Crear el entorno virtual e instalar dependencias
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+### 3. Configurar las credenciales de Adafruit IO
+
+```powershell
+copy .env.example .env
+```
+
+Editar el archivo `.env` con tus datos:
+```
+AIO_USERNAME=tu_usuario_de_adafruit
+AIO_KEY=aio_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### 4. Terminal 1 — Arrancar CounterFit
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+counterfit
+```
+
+Abrir `http://127.0.0.1:5000` y crear los sensores:
+
+| Paso | Sensor | Type | Units | Pin | Random | Min | Max | Acción final |
+|------|--------|------|-------|-----|--------|-----|-----|--------------|
+| 1 | Humedad | Humidity | Percentage | 5 | ✅ | 40 | 90 | **Set** |
+| 2 | Temperatura | Temperature | Celsius | 6 | ✅ | 18 | 35 | **Set** |
+
+> Verificar que la consola de la Terminal 1 muestre `CounterFit - virtual IoT hardware running on port 5000`
+
+### 5. Terminal 2 — Ejecutar el nodo sensor
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python nodo_mqtt.py --interval-sec 10 --samples 20 --db demo.db
+```
+
+Salida esperada en consola:
+```
+MQTT conectado a io.adafruit.com como 'tu_usuario'
+[1/20] 2026-05-17T11:00:00  T=24.3C  HR=67.1%  -> MQTT OK
+[2/20] 2026-05-17T11:00:10  T=27.8C  HR=58.4%  -> MQTT OK
+...
+```
+
+> Si los valores de temperatura y humedad son **siempre iguales**, vuelve a CounterFit y haz clic en **Set** en cada sensor para aplicar el modo Random.
+
+### 6. Terminal 3 — Ver registros SQLite en tiempo real
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+while ($true) {
+    Clear-Host
+    .\.venv\Scripts\python.exe -c "import sqlite3,pandas as pd; c=sqlite3.connect('demo.db'); print(pd.read_sql('SELECT id, ts, temperatura_c, humedad_pct FROM lecturas ORDER BY id DESC LIMIT 8',c).to_string(index=False)); c.close()"
+    Start-Sleep 10
+}
+```
+
+### 7. Verificar en Adafruit IO
+
+Abrir en el navegador:
+```
+https://io.adafruit.com/NANY1993/dashboards
+```
+
+Los feeds `temperatura` y `humedad` deben actualizarse cada 10 segundos con los valores que llegan desde CounterFit.
+
+### 8. Verificar total de registros al finalizar
+
+```powershell
+.\.venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('demo.db'); print(c.execute('SELECT COUNT(*) FROM lecturas').fetchone()[0], 'filas guardadas en SQLite'); c.close()"
 ```
 
 ---
