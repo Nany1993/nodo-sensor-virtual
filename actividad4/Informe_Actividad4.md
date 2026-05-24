@@ -54,15 +54,15 @@ La selección de TimescaleDB como infraestructura de almacenamiento respondió a
 **Comparación de infraestructuras evaluadas:**
 
 | Criterio | BD relacional tradicional | TimescaleDB Cloud | Relevancia para IoT |
-|---|:---:|:---:|---|
-| Escalabilidad de escrituras | ⚠️ Degrada > 1 M filas | ✅ Miles de millones | Alta — escritura continua cada 30 s |
-| Consultas por rango de tiempo | 🔴 Escaneo completo | ✅ Solo chunk relevante | Crítica — todas las consultas son temporales |
-| Funciones time-series nativas | ❌ No disponibles | ✅ `time_bucket()`, `first()`, `last()` | Alta — agrupamiento horario/diario en el servidor |
-| Agregados continuos automáticos | ❌ No | ✅ En background | Media — vistas precalculadas sin código extra |
-| Compresión de datos históricos | ❌ No | ✅ Hasta 90 % | Media — reduce costos de almacenamiento |
-| Políticas de retención | ❌ Manual | ✅ Drop chunks automático | Media — gestión del ciclo de vida del dato |
-| Acceso remoto | ⚠️ Limitado / archivo local | ✅ PostgreSQL estándar (SSL) | Alta — nodo sensor y dashboard en equipos distintos |
-| Costo de adopción | ✅ Gratuito | ✅ Plan básico gratuito | — |
+|---|---|---|---|
+| Escalabilidad de escrituras | Degrada a partir de ~1 M filas | Miles de millones sin degradación | Alta — escritura continua cada 30 s |
+| Consultas por rango de tiempo | Escaneo completo de la tabla | Solo el chunk temporal relevante | Crítica — todas las consultas son temporales |
+| Funciones time-series nativas | No disponibles; lógica en el cliente | `time_bucket()`, `first()`, `last()` nativos | Alta — agrupamiento horario/diario en el servidor |
+| Agregados continuos automáticos | No | Sí, en background | Media — vistas precalculadas sin código extra |
+| Compresión de datos históricos | No | Sí, hasta 90 % | Media — reduce costos de almacenamiento |
+| Políticas de retención | Eliminación manual | Drop chunks automático configurable | Media — gestión del ciclo de vida del dato |
+| Acceso remoto | Limitado / archivo local | Nativo vía PostgreSQL estándar (SSL) | Alta — nodo sensor y dashboard en equipos distintos |
+| Costo de adopción | Gratuito | Plan básico gratuito | — |
 
 > **Decisión:** TimescaleDB Cloud fue seleccionado porque su modelo de **hypertable particionada por tiempo** resuelve de forma nativa los tres requisitos principales de un sistema IoT: escritura de alta frecuencia, consultas eficientes sobre ventanas temporales y acceso remoto desde múltiples clientes.
 
