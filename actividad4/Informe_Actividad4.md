@@ -18,7 +18,30 @@ El Internet de las Cosas (IoT) genera volúmenes continuos de datos de series de
 
 Esta actividad implementa una infraestructura de almacenamiento y procesamiento de datos IoT completa, usando un nodo sensor virtual basado en **CounterFit** (simulador de hardware) que captura temperatura y humedad relativa con un sensor DHT11 virtual. Los datos fluyen directamente desde el nodo sensor hacia una base de datos en la nube especializada en series de tiempo, donde se aplican técnicas de preprocesamiento, filtrado y transformación.
 
-La infraestructura elegida es **TimescaleDB Cloud (Tiger Cloud)**, una extensión de PostgreSQL diseñada específicamente para series de tiempo. Se implementa un pipeline completo e independiente: captura → almacenamiento cloud → procesamiento → visualización en tiempo real.
+La infraestructura elegida es **TimescaleDB Cloud (Tiger Cloud)**, una extensión de PostgreSQL diseñada específicamente para series de tiempo. Se implementa un pipeline completo e independiente:
+
+```
+┌─────────────────┐     cada 30 s      ┌──────────────────────┐
+│   CounterFit    │  ─────────────────► │  TimescaleDB Cloud   │
+│  (DHT11 virtual)│   psycopg2 / SSL    │  hypertable          │
+│  T °C  |  HR %  │                     │  lecturas_iot        │
+└─────────────────┘                     └──────────┬───────────┘
+      CAPTURA                                       │
+                                          ALMACENAMIENTO CLOUD
+                                                    │
+                              ┌─────────────────────┴──────────────────────┐
+                              │                                             │
+                              ▼                                             ▼
+                 ┌────────────────────────┐               ┌────────────────────────┐
+                 │  Procesamiento_Datos   │               │    dashboard_iot.py    │
+                 │  _IoT.ipynb            │               │    (Streamlit)         │
+                 │  · Preprocesamiento    │               │    localhost:8501       │
+                 │  · Filtrado            │               │    · Datos en vivo      │
+                 │  · Transformación      │               │    · Análisis           │
+                 └────────────────────────┘               │    · Datos procesados  │
+                       PROCESAMIENTO                       └────────────────────────┘
+                                                           VISUALIZACIÓN EN TIEMPO REAL
+```
 
 ---
 
