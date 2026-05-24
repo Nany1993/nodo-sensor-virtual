@@ -10,3 +10,5 @@ matplotlib>=3.7
 # Actividad 2: transmisión MQTT hacia Adafruit IO
 paho-mqtt>=1.6,<3
 python-dotenv>=1.0
+# Actividad 4: almacenamiento en TimescaleDB Cloud
+psycopg2-binary>=2.9
