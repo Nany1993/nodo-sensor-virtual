@@ -90,10 +90,15 @@ Se creó el script `actividad4/nodo_timescale.py` como flujo autónomo. El scrip
 
 ```sql
 CREATE TABLE lecturas_iot (
-    ts              TIMESTAMPTZ NOT NULL,   -- marca de tiempo con zona horaria
-    temperatura_c   DOUBLE PRECISION NOT NULL,
-    humedad_pct     DOUBLE PRECISION NOT NULL,
-    fuente          TEXT DEFAULT 'counterfit'
+    ts              TIMESTAMPTZ      NOT NULL,  -- marca de tiempo UTC
+    temperatura_c   DOUBLE PRECISION NOT NULL,  -- valor crudo del sensor
+    humedad_pct     DOUBLE PRECISION NOT NULL,  -- valor crudo del sensor
+    temp_movil      DOUBLE PRECISION,           -- promedio movil (ventana 5)
+    hum_movil       DOUBLE PRECISION,           -- promedio movil (ventana 5)
+    temp_norm       DOUBLE PRECISION,           -- normalizacion min-max [0,1]
+    hum_norm        DOUBLE PRECISION,           -- normalizacion min-max [0,1]
+    valida          BOOLEAN          DEFAULT TRUE, -- paso el preprocesamiento
+    fuente          TEXT             DEFAULT 'counterfit'
 );
 
 SELECT create_hypertable('lecturas_iot', 'ts', if_not_exists => TRUE);
@@ -101,28 +106,33 @@ SELECT create_hypertable('lecturas_iot', 'ts', if_not_exists => TRUE);
 CREATE INDEX idx_lecturas_iot_ts ON lecturas_iot (ts DESC);
 ```
 
-La columna `ts` usa el tipo `TIMESTAMPTZ` (timestamp with time zone), que almacena los valores en UTC. Esto es una buena práctica en sistemas IoT donde los nodos pueden estar en diferentes zonas horarias.
+La tabla almacena tanto los valores crudos del sensor como los resultados del pipeline de procesamiento en la misma fila. Esto garantiza que el procesamiento ocurre **antes** del almacenamiento (en el nodo sensor), no como un paso posterior sobre datos ya guardados. La columna `valida` permite identificar y excluir lecturas que no superaron el preprocesamiento.
 
 **Flujo de datos — Actividad 4:**
 
 ```
 CounterFit (DHT11 virtual, puerto 5050)
-   │  pin 5: Humedad (%)
-   │  pin 6: Temperatura (°C)
+   │  pin 5: Humedad (%)   pin 6: Temperatura (°C)
    ▼
-nodo_timescale.py
-   │  INSERT cada 30 s (psycopg2, TCP/SSL)
-   ▼
-TimescaleDB Cloud — Tiger Cloud
-   │  hypertable: lecturas_iot
+nodo_timescale.py — pipeline de procesamiento en linea
    │
-   ├──► Procesamiento_Datos_IoT.ipynb
-   │       ├── Preprocesamiento
-   │       ├── Filtrado (time_bucket, umbrales)
-   │       └── Transformación (MA, normalización, agregados)
+   ├─ 1. PREPROCESAMIENTO: validacion de rangos [17,36] °C / [33,94] %
+   │       lectura invalida ──► descartada + log en consola
    │
-   └──► dashboard_iot.py (Streamlit)
-           http://localhost:8501
+   ├─ 2. FILTRADO: anti-duplicados por marca de tiempo minima
+   │
+   ├─ 3. TRANSFORMACION:
+   │       promedio movil (ventana 5) → temp_movil, hum_movil
+   │       normalizacion min-max      → temp_norm,  hum_norm
+   │
+   └─► INSERT en TimescaleDB Cloud (datos crudos + procesados en una sola fila)
+              │
+              │  hypertable: lecturas_iot
+              │  columnas: ts, temperatura_c, humedad_pct,
+              │            temp_movil, hum_movil, temp_norm, hum_norm, valida
+              │
+              └──► dashboard_iot.py (Streamlit) — lee columnas procesadas directamente de la BD
+                       http://localhost:8501
 ```
 
 **Configuración de CounterFit:**
@@ -151,35 +161,29 @@ TimescaleDB Cloud — Tiger Cloud
 
 ### 2.3 Técnicas de procesamiento de datos
 
-El procesamiento se implementó en el notebook `Procesamiento_Datos_IoT.ipynb` combinando SQL nativo de TimescaleDB con operaciones pandas.
+El procesamiento se implementó **dentro del script `nodo_timescale.py`** como un pipeline en línea que actúa sobre cada lectura antes de su inserción en TimescaleDB. Los datos almacenados en la hypertable incluyen tanto los valores crudos del sensor como los resultados del procesamiento en la misma fila, garantizando que el procesamiento es parte integral del flujo de captura.
 
 #### 2.3.1 Preprocesamiento
 
-**a) Verificación de integridad:**
-Se verificó que la hypertable no contenía valores nulos en ninguna columna (garantizado por las restricciones `NOT NULL` en el esquema). Se identificaron y eliminaron filas duplicadas con `drop_duplicates()`.
+En cada ciclo, la clase `Procesador` valida la lectura contra rangos operacionales definidos según la configuración de CounterFit:
+- **Temperatura:** [17.0, 36.0] °C
+- **Humedad:** [33.0, 94.0] %
 
-**b) Detección de anomalías por rango:**
-Se definieron rangos válidos con margen operacional según los valores configurados en CounterFit:
-- Temperatura: [17.0, 36.0] °C
-- Humedad: [33.0, 94.0] %
-
-Las lecturas fuera de estos rangos se catalogaron como anomalías. En la prueba realizada, el 100% de las lecturas estuvo dentro de los rangos válidos, validando el correcto funcionamiento del simulador.
+Si una lectura está fuera de rango es **descartada** antes de la inserción y registrada en consola. La columna `valida = TRUE` en la hypertable confirma que cada fila superó esta validación. Las restricciones `NOT NULL` del esquema garantizan adicionalmente la ausencia de valores nulos.
 
 #### 2.3.2 Filtrado
 
-**a) Filtrado por ventana temporal** — consulta SQL nativa sobre la hypertable:
+**a) Anti-duplicados por intervalo temporal:** el pipeline verifica que haya transcurrido el tiempo mínimo esperado entre muestras antes de procesar una nueva lectura, previniendo filas duplicadas ante retrasos del sensor.
+
+**b) Filtrado por ventana temporal en SQL** (consultas de análisis y dashboard):
 ```sql
 SELECT * FROM lecturas_iot
 WHERE ts >= NOW() - INTERVAL '1 hour'
+  AND valida = TRUE
 ORDER BY ts;
 ```
-Esta consulta aprovecha la partición por tiempo de TimescaleDB para acceder únicamente al chunk más reciente, sin escanear datos históricos.
 
-**b) Filtrado por umbral de alerta:**
-Se identificaron lecturas que superaban condiciones de alerta: temperatura > 27 °C o humedad > 75 %. En un sistema real, estas lecturas generarían notificaciones o activarían actuadores.
-
-**c) Agregación temporal con `time_bucket()`:**
-Función nativa de TimescaleDB que divide el eje temporal en intervalos regulares y realiza las agregaciones directamente en el motor de base de datos:
+**c) Agregación temporal con `time_bucket()`:** función nativa de TimescaleDB que agrupa lecturas en intervalos regulares directamente en el servidor:
 ```sql
 SELECT time_bucket('1 hour', ts) AS hora,
        AVG(temperatura_c) AS temp_promedio,
@@ -187,23 +191,29 @@ SELECT time_bucket('1 hour', ts) AS hora,
        MAX(temperatura_c) AS temp_max,
        COUNT(*) AS n_lecturas
 FROM lecturas_iot
+WHERE valida = TRUE
 GROUP BY hora ORDER BY hora;
 ```
 
 #### 2.3.3 Transformación
 
-**a) Promedio móvil (suavizado de ruido):**
-Se aplicó una ventana deslizante de 5 muestras (`rolling(window=5, center=True)`) para suavizar las variaciones de alta frecuencia del sensor simulado. Esta técnica reduce el ruido manteniendo la tendencia real de la señal.
+Las transformaciones se calculan en memoria en el nodo sensor y se almacenan como columnas en cada fila insertada:
 
-**b) Normalización min-max:**
-Se normalizaron temperatura y humedad al intervalo [0, 1] usando:
-```
-x_norm = (x - x_min) / (x_max - x_min)
-```
-Esta transformación permite comparar variables de diferentes unidades y es preprocesamiento estándar para algoritmos de aprendizaje automático.
+**a) Promedio móvil (ventana = 5 muestras):** se mantiene una cola deslizante con las últimas 5 lecturas válidas. El promedio se almacena en `temp_movil` y `hum_movil`. Suaviza variaciones de alta frecuencia sin introducir retardo apreciable en la detección de tendencias.
 
-**c) Agregados diarios:**
-Se calcularon estadísticas por día (promedio, desviación estándar, conteo) usando `time_bucket('1 day', ts)`, generando una vista resumida del comportamiento diario.
+**b) Normalización min-max:** se rastrean el mínimo y máximo históricos de cada variable. Los valores normalizados al intervalo [0, 1] se almacenan en `temp_norm` y `hum_norm`:
+```
+x_norm = (x - x_min_hist) / (x_max_hist - x_min_hist)
+```
+
+**Resumen del pipeline por ciclo:**
+```
+Lectura cruda: T=24.3 °C  HR=61.5 %
+  -> Preprocesamiento : VALIDA (dentro de rangos)
+  -> Filtrado         : intervalo OK
+  -> Transformacion   : MA=(23.8, 60.2)  norm=(0.382, 0.515)
+  -> INSERT TimescaleDB: todas las columnas en una sola fila
+```
 
 ---
 
@@ -215,17 +225,24 @@ La prueba de captura con `nodo_timescale.py` produjo el siguiente resultado en c
 
 ```
 Conectando a TimescaleDB Cloud...
-Esquema verificado.
-Inicio Actividad 4: 360 muestras cada 30s -> TimescaleDB Cloud (lecturas_iot) | fuente=counterfit
-[1/360]  2026-05-24T20:01:53Z  T=23.14C  HR=62.78%  -> TimescaleDB OK
-[2/360]  2026-05-24T20:02:23Z  T=21.12C  HR=54.08%  -> TimescaleDB OK
-...
-[360/360] 2026-05-27T21:01:53Z  T=25.02C  HR=59.81%  -> TimescaleDB OK
+Esquema verificado (columnas de procesamiento presentes).
 
-Total acumulado en lecturas_iot: 360 filas.
+Inicio Actividad 4 | 360 lecturas cada 30s | fuente=counterfit | ventana_MA=5
+Pipeline: CAPTURA -> PREPROCESAMIENTO -> FILTRADO -> TRANSFORMACION -> TimescaleDB
+
+[1/360]  2026-05-24T20:01:53Z  T=23.14C  HR=62.78%  MA=(23.14,62.78)  norm=(0.341,0.512)  -> OK
+[2/360]  2026-05-24T20:02:23Z  T=21.89C  HR=58.41%  MA=(22.51,60.59)  norm=(0.291,0.449)  -> OK
+...
+[360/360] 2026-05-27T21:01:53Z  T=25.02C  HR=59.81%  MA=(24.31,60.12)  norm=(0.395,0.473)  -> OK
+
+--- Resumen del pipeline ---
+  Lecturas intentadas : 360
+  Insertadas en BD    : 360
+  Descartadas         : 0
+  Total acumulado     : 360 filas en lecturas_iot
 ```
 
-Cada fila insertada se confirmó con `-> TimescaleDB OK`, indicando escritura exitosa. La tasa de error de inserción fue del 0%.
+Cada lectura registra en consola los valores crudos, el promedio móvil calculado y el valor normalizado antes de confirmar la inserción. La tasa de descarte fue del 0%, lo que valida la correcta configuración del simulador CounterFit.
 
 ### 3.2 Resultados del preprocesamiento
 

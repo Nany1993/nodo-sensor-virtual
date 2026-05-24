@@ -101,8 +101,14 @@ def load_all() -> pd.DataFrame:
         SELECT ts AT TIME ZONE 'America/Bogota' AS ts_local,
                temperatura_c,
                humedad_pct,
+               temp_movil,
+               hum_movil,
+               temp_norm,
+               hum_norm,
+               valida,
                fuente
         FROM lecturas_iot
+        WHERE valida = TRUE
         ORDER BY ts;
     """)
     df["ts_local"] = pd.to_datetime(df["ts_local"])
@@ -136,6 +142,13 @@ st.title("Monitoreo Ambiental IoT en Tiempo Real")
 st.caption(
     "Lecturas de temperatura y humedad generadas por el sensor virtual DHT11 (CounterFit), "
     "almacenadas en **TimescaleDB Cloud**. Actividad 4 — Maestria en Inteligencia Artificial."
+)
+st.info(
+    "**Pipeline de procesamiento activo:** cada lectura pasa por "
+    "**preprocesamiento** (validacion de rangos) → **filtrado** (anti-duplicados, time_bucket) → "
+    "**transformacion** (promedio movil, normalizacion min-max) antes de almacenarse en TimescaleDB. "
+    "Los valores procesados que ves en la pestana 'Datos procesados' se calcularon en el nodo sensor, no en el dashboard.",
+    icon="⚙️",
 )
 
 col_ref, col_info = st.columns([1, 9])
@@ -380,38 +393,43 @@ with tab2:
 
 with tab3:
 
-    # ── Promedio movil ────────────────────────────────────────────────────────
-    st.subheader(f"Suavizado de la senal — Promedio movil (ventana: {ventana_ma} lecturas)")
     st.caption(
-        f"Las lineas transparentes son los datos originales (con todas sus variaciones). "
-        f"Las lineas solidas son el resultado de promediar cada lectura con las {ventana_ma} lecturas vecinas. "
-        f"Esto reduce el 'ruido' del sensor y permite ver la tendencia real mas claramente. "
-        f"Puedes cambiar el tamano de la ventana en el panel izquierdo: mas lecturas = curva mas lisa."
+        "Los valores de esta pestana fueron calculados por el **nodo sensor** antes de ser almacenados "
+        "en TimescaleDB. No son calculos del dashboard — son columnas reales de la base de datos."
     )
 
-    df_proc = df.copy()
-    df_proc["temp_ma"] = df_proc["temperatura_c"].rolling(window=ventana_ma, center=True).mean()
-    df_proc["hum_ma"]  = df_proc["humedad_pct"].rolling(window=ventana_ma, center=True).mean()
+    # ── Promedio movil (columnas pre-calculadas en TimescaleDB) ───────────────
+    st.subheader("Suavizado de la senal — Promedio movil (ventana: 5 lecturas)")
+    st.caption(
+        "Las lineas transparentes son los datos crudos del sensor. "
+        "Las lineas solidas son el promedio movil de 5 muestras calculado en el nodo sensor "
+        "y almacenado como columna `temp_movil` / `hum_movil` en TimescaleDB. "
+        "Este suavizado reduce el ruido y revela la tendencia real de la senal."
+    )
+
+    tiene_movil = "temp_movil" in df.columns and df["temp_movil"].notna().any()
 
     fig_ma = go.Figure()
     fig_ma.add_trace(go.Scatter(
-        x=df_proc["ts_local"], y=df_proc["temperatura_c"],
+        x=df["ts_local"], y=df["temperatura_c"],
         name="Temperatura original", line=dict(color="rgba(233,69,96,0.3)", width=1),
     ))
+    if tiene_movil:
+        fig_ma.add_trace(go.Scatter(
+            x=df["ts_local"], y=df["temp_movil"],
+            name="Temperatura MA-5 (almacenada en BD)", line=dict(color="#e94560", width=2.5),
+        ))
     fig_ma.add_trace(go.Scatter(
-        x=df_proc["ts_local"], y=df_proc["temp_ma"],
-        name=f"Temperatura suavizada (MA-{ventana_ma})", line=dict(color="#e94560", width=2.5),
-    ))
-    fig_ma.add_trace(go.Scatter(
-        x=df_proc["ts_local"], y=df_proc["humedad_pct"],
+        x=df["ts_local"], y=df["humedad_pct"],
         name="Humedad original", line=dict(color="rgba(74,144,226,0.3)", width=1),
         yaxis="y2",
     ))
-    fig_ma.add_trace(go.Scatter(
-        x=df_proc["ts_local"], y=df_proc["hum_ma"],
-        name=f"Humedad suavizada (MA-{ventana_ma})", line=dict(color="#4a90e2", width=2.5),
-        yaxis="y2",
-    ))
+    if tiene_movil:
+        fig_ma.add_trace(go.Scatter(
+            x=df["ts_local"], y=df["hum_movil"],
+            name="Humedad MA-5 (almacenada en BD)", line=dict(color="#4a90e2", width=2.5),
+            yaxis="y2",
+        ))
     fig_ma.update_layout(
         xaxis_title="Fecha y hora de la lectura",
         yaxis=dict(title="Temperatura (°C)", color="#e94560"),
@@ -473,39 +491,35 @@ with tab3:
             hide_index=True,
         )
 
-    # ── Normalizacion ─────────────────────────────────────────────────────────
+    # ── Normalizacion (columnas pre-calculadas en TimescaleDB) ────────────────
     st.subheader("Comparacion normalizada de temperatura y humedad")
     st.caption(
-        "La normalizacion transforma los valores para que queden entre 0 y 1, donde "
-        "0 representa el valor mas bajo registrado y 1 el mas alto. "
-        "Esto permite comparar temperatura y humedad en la misma escala, aunque tengan unidades diferentes. "
-        "Si ambas curvas suben y bajan juntas, existe una correlacion entre temperatura y humedad. "
-        "Si se mueven en sentidos opuestos, son inversamente proporcionales."
+        "La normalizacion min-max transforma los valores para que queden entre 0 y 1, donde "
+        "0 es el valor mas bajo registrado y 1 el mas alto. "
+        "Calculada por el nodo sensor y almacenada como columnas `temp_norm` / `hum_norm` en TimescaleDB. "
+        "Permite comparar temperatura y humedad en la misma escala aunque tengan unidades diferentes."
     )
-    df_proc["temp_norm"] = (
-        (df_proc["temperatura_c"] - df_proc["temperatura_c"].min()) /
-        (df_proc["temperatura_c"].max() - df_proc["temperatura_c"].min())
-    )
-    df_proc["hum_norm"] = (
-        (df_proc["humedad_pct"] - df_proc["humedad_pct"].min()) /
-        (df_proc["humedad_pct"].max() - df_proc["humedad_pct"].min())
-    )
+    tiene_norm = "temp_norm" in df.columns and df["temp_norm"].notna().any()
     fig_norm = go.Figure()
-    fig_norm.add_trace(go.Scatter(
-        x=df_proc["ts_local"], y=df_proc["temp_norm"],
-        name="Temperatura normalizada", line=dict(color="#e94560", width=2),
-    ))
-    fig_norm.add_trace(go.Scatter(
-        x=df_proc["ts_local"], y=df_proc["hum_norm"],
-        name="Humedad normalizada", line=dict(color="#4a90e2", width=2),
-    ))
+    if tiene_norm:
+        fig_norm.add_trace(go.Scatter(
+            x=df["ts_local"], y=df["temp_norm"],
+            name="Temperatura normalizada (almacenada en BD)", line=dict(color="#e94560", width=2),
+        ))
+        fig_norm.add_trace(go.Scatter(
+            x=df["ts_local"], y=df["hum_norm"],
+            name="Humedad normalizada (almacenada en BD)", line=dict(color="#4a90e2", width=2),
+        ))
+    else:
+        st.info("Ejecuta nodo_timescale.py actualizado para generar columnas normalizadas en la BD.")
     fig_norm.update_layout(
         xaxis_title="Fecha y hora de la lectura",
         yaxis_title="Valor normalizado (0 = minimo, 1 = maximo)",
         legend=dict(orientation="h", y=1.1),
         height=350,
     )
-    st.plotly_chart(fig_norm, width="stretch")
+    if tiene_norm:
+        st.plotly_chart(fig_norm, width="stretch")
 
     # ── Resumen diario ────────────────────────────────────────────────────────
     st.subheader("Resumen por dia")
