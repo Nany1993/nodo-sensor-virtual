@@ -5,13 +5,13 @@ Flujo:
   nodo_timescale.py (captura) --> TimescaleDB Cloud --> este dashboard (Streamlit)
 
 Uso:
-  # Terminal 1: capturar datos
-  python nodo_timescale.py --simulate --interval-sec 10 --samples 500
+  # Terminal 1: capturar datos desde CounterFit
+  python nodo_timescale.py --port 5050 --interval-sec 30 --samples 360
 
   # Terminal 2: abrir dashboard
   streamlit run dashboard_iot.py
 
-El dashboard se abre en http://localhost:8501 y se refresca automáticamente.
+El dashboard se abre en http://localhost:8501 y se refresca automaticamente.
 """
 
 import os
@@ -24,7 +24,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-# ── Configuracion de página ───────────────────────────────────────────────────
+# ── Configuracion de pagina ───────────────────────────────────────────────────
 
 st.set_page_config(
     page_title="Dashboard IoT — TimescaleDB",
@@ -61,28 +61,35 @@ with st.sidebar:
         "https://assets.timescale.com/docs/images/timescale-logo.svg",
         width=160,
     )
-    st.markdown("## Configuracion")
+    st.markdown("## Configuracion del panel")
 
     refresco = st.selectbox(
-        "Auto-refresco cada:",
+        "Actualizar pantalla cada:",
         options=[10, 30, 60, 120],
         index=1,
         format_func=lambda x: f"{x} segundos",
     )
 
-    ventana_ma = st.slider("Ventana promedio movil (muestras)", 3, 20, 5)
+    ventana_ma = st.slider(
+        "Suavizado del grafico (num. de muestras)",
+        3, 20, 5,
+        help="Cuantas lecturas consecutivas se promedian para suavizar la curva. "
+             "Valor mas alto = curva mas lisa pero menos detalle.",
+    )
 
-    t_alerta = st.slider("Umbral alerta temperatura (C)", 20, 35, 27)
-    h_alerta = st.slider("Umbral alerta humedad (%)", 50, 90, 75)
+    t_alerta = st.slider(
+        "Temperatura de alerta (°C)",
+        20, 35, 27,
+        help="Si la temperatura supera este valor, se marca como condicion de alerta.",
+    )
+    h_alerta = st.slider(
+        "Humedad de alerta (%)",
+        50, 90, 75,
+        help="Si la humedad supera este valor, se marca como condicion de alerta.",
+    )
 
     st.markdown("---")
-    st.markdown(
-        "**Nodo sensor activo si ves filas nuevas.**\n\n"
-        "```bash\npython nodo_timescale.py \\\n"
-        "  --simulate \\\n"
-        "  --interval-sec 10 \\\n"
-        "  --samples 500\n```"
-    )
+    st.markdown("**El sensor esta activo si los datos aumentan con cada refresco.**")
     st.markdown("---")
     st.caption("TimescaleDB Cloud — Tiger Cloud v2.27")
 
@@ -123,22 +130,24 @@ def load_total() -> int:
     return query("SELECT COUNT(*) AS n FROM lecturas_iot;")["n"].iloc[0]
 
 
-# ── Header principal ──────────────────────────────────────────────────────────
+# ── Encabezado principal ──────────────────────────────────────────────────────
 
-st.title("Dashboard IoT — Monitoreo Ambiental en Tiempo Real")
+st.title("Monitoreo Ambiental IoT en Tiempo Real")
 st.caption(
-    "Datos desde sensor DHT11 virtual (CounterFit) almacenados en "
-    "**TimescaleDB Cloud (Tiger Cloud)**. Actividad 4 — Maestria en IA."
+    "Lecturas de temperatura y humedad generadas por el sensor virtual DHT11 (CounterFit), "
+    "almacenadas en **TimescaleDB Cloud**. Actividad 4 — Maestria en Inteligencia Artificial."
 )
 
-# Botón de refresco manual
 col_ref, col_info = st.columns([1, 9])
 with col_ref:
-    if st.button("Refrescar ahora"):
+    if st.button("Actualizar ahora"):
         st.cache_data.clear()
         st.rerun()
 with col_info:
-    st.info(f"Auto-refresco cada {refresco} s. Usa el sidebar para cambiar la frecuencia.")
+    st.info(
+        f"La pantalla se actualiza automaticamente cada {refresco} segundos. "
+        "Puedes cambiar este valor en el panel izquierdo."
+    )
 
 st.divider()
 
@@ -150,22 +159,22 @@ try:
     df_hora = load_time_bucket("1 hour")
     df_dia  = load_time_bucket("1 day")
 except Exception as e:
-    st.error(f"Error conectando a TimescaleDB: {e}")
+    st.error(f"No se pudo conectar a la base de datos: {e}")
     st.stop()
 
 if df.empty:
     st.warning(
-        "No hay datos en la hypertable aun. "
-        "Ejecuta `python nodo_timescale.py --simulate --interval-sec 5 --samples 50` en otra terminal."
+        "Aun no hay datos registrados. "
+        "Inicia la captura con: `.venv\\Scripts\\python nodo_timescale.py --port 5050`"
     )
     st.stop()
 
 # ── PESTANAS ──────────────────────────────────────────────────────────────────
 
 tab1, tab2, tab3 = st.tabs([
-    "Datos en vivo",
-    "Analisis exploratorio",
-    "Datos procesados",
+    "📡  Datos en vivo",
+    "📊  Analisis exploratorio",
+    "⚙️  Datos procesados",
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -175,13 +184,17 @@ tab1, tab2, tab3 = st.tabs([
 with tab1:
     ultima = df.iloc[-1]
 
-    st.subheader("Estado actual del sensor")
+    st.subheader("Lectura mas reciente del sensor")
+    st.caption(
+        "Estos valores corresponden a la ultima lectura registrada por el sensor DHT11 virtual. "
+        "La flecha indica si subio o bajo respecto a la lectura anterior."
+    )
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric(
         "Temperatura",
-        f"{ultima['temperatura_c']:.2f} C",
-        delta=f"{ultima['temperatura_c'] - df.iloc[-2]['temperatura_c']:.2f} C"
+        f"{ultima['temperatura_c']:.2f} °C",
+        delta=f"{ultima['temperatura_c'] - df.iloc[-2]['temperatura_c']:.2f} °C"
         if len(df) > 1 else None,
     )
     m2.metric(
@@ -190,8 +203,15 @@ with tab1:
         delta=f"{ultima['humedad_pct'] - df.iloc[-2]['humedad_pct']:.1f} %"
         if len(df) > 1 else None,
     )
-    m3.metric("Total lecturas", f"{total:,}")
-    m4.metric("Ultima lectura", ultima["ts_local"].strftime("%H:%M:%S"))
+    m3.metric(
+        "Total de lecturas guardadas",
+        f"{total:,}",
+        help="Numero total de registros almacenados en TimescaleDB Cloud.",
+    )
+    m4.metric(
+        "Hora de la ultima lectura",
+        ultima["ts_local"].strftime("%H:%M:%S"),
+    )
 
     st.divider()
 
@@ -199,20 +219,25 @@ with tab1:
     alertas = df[(df["temperatura_c"] > t_alerta) | (df["humedad_pct"] > h_alerta)]
     if len(alertas) > 0:
         st.warning(
-            f"**{len(alertas)} lecturas en condicion de alerta** "
-            f"(T > {t_alerta} C o HR > {h_alerta} %) — "
-            f"{100*len(alertas)/len(df):.1f}% del total."
+            f"**{len(alertas)} lecturas superan los umbrales de alerta** "
+            f"(Temperatura > {t_alerta} °C o Humedad > {h_alerta} %) — "
+            f"representa el {100*len(alertas)/len(df):.1f}% del total de registros. "
+            "Puedes ajustar estos umbrales desde el panel izquierdo."
         )
     else:
-        st.success("Sin alertas activas en el rango actual.")
+        st.success(
+            f"Todos los valores estan dentro de los rangos normales "
+            f"(Temperatura <= {t_alerta} °C y Humedad <= {h_alerta} %)."
+        )
 
-    st.subheader("Ultimas 20 lecturas")
+    st.subheader("Ultimas 20 lecturas registradas")
+    st.caption("Las lecturas mas recientes aparecen primero. La columna 'Fuente' indica si el dato vino del sensor virtual (counterfit) o de una simulacion interna.")
     st.dataframe(
         df.tail(20)[["ts_local", "temperatura_c", "humedad_pct", "fuente"]]
         .sort_values("ts_local", ascending=False)
         .rename(columns={
-            "ts_local": "Timestamp",
-            "temperatura_c": "Temp (C)",
+            "ts_local": "Fecha y hora",
+            "temperatura_c": "Temperatura (°C)",
             "humedad_pct": "Humedad (%)",
             "fuente": "Fuente",
         }),
@@ -220,12 +245,17 @@ with tab1:
         hide_index=True,
     )
 
-    # Minigráfica en vivo (últimas 50 muestras)
+    st.subheader("Grafico de las ultimas 50 lecturas")
+    st.caption(
+        "Muestra como han variado la temperatura (rojo, eje izquierdo) y la humedad (azul, eje derecho) "
+        "en las ultimas 50 mediciones. Cada punto es una lectura del sensor. "
+        "Puedes hacer zoom con el mouse o descargar la imagen con los iconos de la esquina superior derecha."
+    )
     df_live = df.tail(50)
     fig_live = go.Figure()
     fig_live.add_trace(go.Scatter(
         x=df_live["ts_local"], y=df_live["temperatura_c"],
-        name="Temperatura (C)", line=dict(color="#e94560", width=2),
+        name="Temperatura (°C)", line=dict(color="#e94560", width=2),
         mode="lines+markers", marker=dict(size=4),
     ))
     fig_live.add_trace(go.Scatter(
@@ -235,10 +265,9 @@ with tab1:
         yaxis="y2",
     ))
     fig_live.update_layout(
-        title="Ultimas 50 lecturas (en vivo)",
-        xaxis_title="Tiempo",
-        yaxis=dict(title="Temperatura (C)", color="#e94560"),
-        yaxis2=dict(title="Humedad (%)", color="#4a90e2", overlaying="y", side="right"),
+        xaxis_title="Hora de la lectura",
+        yaxis=dict(title="Temperatura (°C)", color="#e94560"),
+        yaxis2=dict(title="Humedad relativa (%)", color="#4a90e2", overlaying="y", side="right"),
         legend=dict(orientation="h", y=1.1),
         height=380,
     )
@@ -249,12 +278,16 @@ with tab1:
 # ─────────────────────────────────────────────────────────────────────────────
 
 with tab2:
-    st.subheader("Serie temporal completa — datos crudos")
-
+    st.subheader("Comportamiento de los sensores a lo largo del tiempo")
+    st.caption(
+        "Esta grafica muestra TODOS los datos capturados desde que inicio la medicion. "
+        "La linea roja es la temperatura (escala izquierda) y la azul es la humedad (escala derecha). "
+        "Si las lineas son muy irregulares, es normal: los sensores tienen variaciones naturales entre lectura y lectura."
+    )
     fig_ts = go.Figure()
     fig_ts.add_trace(go.Scatter(
         x=df["ts_local"], y=df["temperatura_c"],
-        name="Temperatura (C)", line=dict(color="#e94560", width=1.5),
+        name="Temperatura (°C)", line=dict(color="#e94560", width=1.5),
     ))
     fig_ts.add_trace(go.Scatter(
         x=df["ts_local"], y=df["humedad_pct"],
@@ -262,51 +295,79 @@ with tab2:
         yaxis="y2",
     ))
     fig_ts.update_layout(
-        xaxis_title="Tiempo",
-        yaxis=dict(title="Temperatura (C)", color="#e94560"),
-        yaxis2=dict(title="Humedad (%)", color="#4a90e2", overlaying="y", side="right"),
+        xaxis_title="Fecha y hora de la lectura",
+        yaxis=dict(title="Temperatura (°C)", color="#e94560"),
+        yaxis2=dict(title="Humedad relativa (%)", color="#4a90e2", overlaying="y", side="right"),
         legend=dict(orientation="h", y=1.1),
         height=400,
     )
     st.plotly_chart(fig_ts, width="stretch")
 
+    st.subheader("Distribucion de valores — Histogramas")
+    st.caption(
+        "Los histogramas muestran cuantas veces aparecio cada rango de valor. "
+        "Una barra alta significa que ese rango de temperatura o humedad fue el mas frecuente. "
+        "Si la distribucion es uniforme (todas las barras de altura similar), significa que el sensor genero valores de forma aleatoria en todo el rango configurado."
+    )
     col_h1, col_h2 = st.columns(2)
     with col_h1:
         fig_ht = px.histogram(
             df, x="temperatura_c", nbins=20,
-            title="Distribucion de temperatura",
-            labels={"temperatura_c": "Temperatura (C)"},
+            title="¿Cuantas veces se midio cada rango de temperatura?",
+            labels={"temperatura_c": "Temperatura (°C)", "count": "Numero de lecturas"},
             color_discrete_sequence=["#e94560"],
         )
+        fig_ht.update_layout(yaxis_title="Numero de lecturas")
         st.plotly_chart(fig_ht, width="stretch")
     with col_h2:
         fig_hh = px.histogram(
             df, x="humedad_pct", nbins=20,
-            title="Distribucion de humedad",
-            labels={"humedad_pct": "Humedad (%)"},
+            title="¿Cuantas veces se midio cada rango de humedad?",
+            labels={"humedad_pct": "Humedad (%)", "count": "Numero de lecturas"},
             color_discrete_sequence=["#4a90e2"],
         )
+        fig_hh.update_layout(yaxis_title="Numero de lecturas")
         st.plotly_chart(fig_hh, width="stretch")
 
-    st.subheader("Estadisticas descriptivas")
+    st.subheader("Resumen estadistico de los datos")
+    st.caption(
+        "Esta tabla resume el comportamiento de los datos: "
+        "**count** = total de lecturas, **mean** = promedio, **std** = que tanto varian los datos respecto al promedio (variabilidad), "
+        "**min/max** = valor mas bajo y mas alto registrado, **25%/50%/75%** = percentiles (el 50% es la mediana)."
+    )
     stats = (
         df[["temperatura_c", "humedad_pct"]]
         .describe()
         .round(3)
-        .rename(columns={"temperatura_c": "Temperatura (C)", "humedad_pct": "Humedad (%)"})
+        .rename(columns={"temperatura_c": "Temperatura (°C)", "humedad_pct": "Humedad (%)"})
+        .rename(index={
+            "count": "Total lecturas",
+            "mean": "Promedio",
+            "std": "Desviacion estandar",
+            "min": "Valor minimo",
+            "25%": "Percentil 25%",
+            "50%": "Mediana (50%)",
+            "75%": "Percentil 75%",
+            "max": "Valor maximo",
+        })
     )
     st.dataframe(stats, width="stretch")
 
-    st.subheader("Lecturas en condicion de alerta")
+    st.subheader("Lecturas que superan los umbrales de alerta")
+    st.caption(
+        f"Se filtran las lecturas donde la temperatura supero {t_alerta} °C o la humedad supero {h_alerta} %. "
+        "En un sistema real, estas lecturas podrian activar una alarma o enviar una notificacion."
+    )
     df_alertas = df[(df["temperatura_c"] > t_alerta) | (df["humedad_pct"] > h_alerta)].copy()
     if df_alertas.empty:
-        st.success("Ninguna lectura supera los umbrales configurados.")
+        st.success(f"No hay lecturas que superen los umbrales configurados ({t_alerta} °C / {h_alerta} %).")
     else:
         st.dataframe(
             df_alertas[["ts_local", "temperatura_c", "humedad_pct"]]
+            .sort_values("ts_local", ascending=False)
             .rename(columns={
-                "ts_local": "Timestamp",
-                "temperatura_c": "Temp (C)",
+                "ts_local": "Fecha y hora",
+                "temperatura_c": "Temperatura (°C)",
                 "humedad_pct": "Humedad (%)",
             }),
             width="stretch",
@@ -318,7 +379,15 @@ with tab2:
 # ─────────────────────────────────────────────────────────────────────────────
 
 with tab3:
-    st.subheader(f"Promedio movil (ventana = {ventana_ma} muestras)")
+
+    # ── Promedio movil ────────────────────────────────────────────────────────
+    st.subheader(f"Suavizado de la senal — Promedio movil (ventana: {ventana_ma} lecturas)")
+    st.caption(
+        f"Las lineas transparentes son los datos originales (con todas sus variaciones). "
+        f"Las lineas solidas son el resultado de promediar cada lectura con las {ventana_ma} lecturas vecinas. "
+        f"Esto reduce el 'ruido' del sensor y permite ver la tendencia real mas claramente. "
+        f"Puedes cambiar el tamano de la ventana en el panel izquierdo: mas lecturas = curva mas lisa."
+    )
 
     df_proc = df.copy()
     df_proc["temp_ma"] = df_proc["temperatura_c"].rolling(window=ventana_ma, center=True).mean()
@@ -327,40 +396,48 @@ with tab3:
     fig_ma = go.Figure()
     fig_ma.add_trace(go.Scatter(
         x=df_proc["ts_local"], y=df_proc["temperatura_c"],
-        name="Temp raw", line=dict(color="rgba(233,69,96,0.3)", width=1),
+        name="Temperatura original", line=dict(color="rgba(233,69,96,0.3)", width=1),
     ))
     fig_ma.add_trace(go.Scatter(
         x=df_proc["ts_local"], y=df_proc["temp_ma"],
-        name=f"Temp MA-{ventana_ma}", line=dict(color="#e94560", width=2.5),
+        name=f"Temperatura suavizada (MA-{ventana_ma})", line=dict(color="#e94560", width=2.5),
     ))
     fig_ma.add_trace(go.Scatter(
         x=df_proc["ts_local"], y=df_proc["humedad_pct"],
-        name="Hum raw", line=dict(color="rgba(74,144,226,0.3)", width=1),
+        name="Humedad original", line=dict(color="rgba(74,144,226,0.3)", width=1),
         yaxis="y2",
     ))
     fig_ma.add_trace(go.Scatter(
         x=df_proc["ts_local"], y=df_proc["hum_ma"],
-        name=f"Hum MA-{ventana_ma}", line=dict(color="#4a90e2", width=2.5),
+        name=f"Humedad suavizada (MA-{ventana_ma})", line=dict(color="#4a90e2", width=2.5),
         yaxis="y2",
     ))
     fig_ma.update_layout(
-        xaxis_title="Tiempo",
-        yaxis=dict(title="Temperatura (C)", color="#e94560"),
-        yaxis2=dict(title="Humedad (%)", color="#4a90e2", overlaying="y", side="right"),
+        xaxis_title="Fecha y hora de la lectura",
+        yaxis=dict(title="Temperatura (°C)", color="#e94560"),
+        yaxis2=dict(title="Humedad relativa (%)", color="#4a90e2", overlaying="y", side="right"),
         legend=dict(orientation="h", y=1.12),
         height=420,
     )
     st.plotly_chart(fig_ma, width="stretch")
 
-    st.subheader("Agregados por hora — time_bucket() en TimescaleDB")
+    # ── Agregados por hora ────────────────────────────────────────────────────
+    st.subheader("Promedio por hora — Resumen horario de los sensores")
+    st.caption(
+        "En lugar de mostrar cada lectura individual, esta grafica agrupa todas las lecturas de cada hora "
+        "y calcula el promedio. Las barras rojas son la temperatura promedio por hora (las lineas verticales "
+        "sobre cada barra muestran el rango entre el valor minimo y maximo de esa hora). "
+        "La linea azul es la humedad promedio por hora. "
+        "Este tipo de vista es util para detectar si hay horas del dia con condiciones ambientales diferentes."
+    )
     if df_hora.empty:
-        st.info("Aun no hay suficientes datos para cubos horarios.")
+        st.info("Aun no hay suficientes datos para calcular promedios por hora. Espera a que se acumulen mas lecturas.")
     else:
         df_hora["periodo"] = pd.to_datetime(df_hora["periodo"])
         fig_bucket = go.Figure()
         fig_bucket.add_trace(go.Bar(
             x=df_hora["periodo"], y=df_hora["temp_prom"],
-            name="Temp prom/hora", marker_color="#e94560", opacity=0.8,
+            name="Temperatura promedio por hora", marker_color="#e94560", opacity=0.8,
             error_y=dict(
                 type="data",
                 symmetric=False,
@@ -370,32 +447,41 @@ with tab3:
         ))
         fig_bucket.add_trace(go.Scatter(
             x=df_hora["periodo"], y=df_hora["hum_prom"],
-            name="Hum prom/hora", line=dict(color="#4a90e2", width=2),
+            name="Humedad promedio por hora", line=dict(color="#4a90e2", width=2),
             mode="lines+markers", yaxis="y2",
         ))
         fig_bucket.update_layout(
-            xaxis_title="Hora",
-            yaxis=dict(title="Temperatura prom (C)"),
-            yaxis2=dict(title="Humedad prom (%)", overlaying="y", side="right"),
+            xaxis_title="Hora del dia",
+            yaxis=dict(title="Temperatura promedio (°C)"),
+            yaxis2=dict(title="Humedad promedio (%)", overlaying="y", side="right"),
             legend=dict(orientation="h", y=1.1),
             height=380,
         )
         st.plotly_chart(fig_bucket, width="stretch")
 
+        st.caption("Tabla de resumen por hora: muestra el promedio, minimo, maximo y cuantas lecturas se tomaron en cada franja horaria.")
         st.dataframe(
             df_hora.rename(columns={
                 "periodo": "Hora",
-                "temp_prom": "Temp prom (C)",
-                "temp_min": "Temp min (C)",
-                "temp_max": "Temp max (C)",
-                "hum_prom": "Hum prom (%)",
-                "n": "N lecturas",
+                "temp_prom": "Temp. promedio (°C)",
+                "temp_min": "Temp. minima (°C)",
+                "temp_max": "Temp. maxima (°C)",
+                "hum_prom": "Humedad prom. (%)",
+                "n": "Num. lecturas",
             }),
             width="stretch",
             hide_index=True,
         )
 
-    st.subheader("Normalizacion min-max [0, 1]")
+    # ── Normalizacion ─────────────────────────────────────────────────────────
+    st.subheader("Comparacion normalizada de temperatura y humedad")
+    st.caption(
+        "La normalizacion transforma los valores para que queden entre 0 y 1, donde "
+        "0 representa el valor mas bajo registrado y 1 el mas alto. "
+        "Esto permite comparar temperatura y humedad en la misma escala, aunque tengan unidades diferentes. "
+        "Si ambas curvas suben y bajan juntas, existe una correlacion entre temperatura y humedad. "
+        "Si se mueven en sentidos opuestos, son inversamente proporcionales."
+    )
     df_proc["temp_norm"] = (
         (df_proc["temperatura_c"] - df_proc["temperatura_c"].min()) /
         (df_proc["temperatura_c"].max() - df_proc["temperatura_c"].min())
@@ -407,44 +493,48 @@ with tab3:
     fig_norm = go.Figure()
     fig_norm.add_trace(go.Scatter(
         x=df_proc["ts_local"], y=df_proc["temp_norm"],
-        name="Temp normalizada", line=dict(color="#e94560", width=2),
+        name="Temperatura normalizada", line=dict(color="#e94560", width=2),
     ))
     fig_norm.add_trace(go.Scatter(
         x=df_proc["ts_local"], y=df_proc["hum_norm"],
-        name="Hum normalizada", line=dict(color="#4a90e2", width=2),
+        name="Humedad normalizada", line=dict(color="#4a90e2", width=2),
     ))
     fig_norm.update_layout(
-        title="Temperatura y humedad normalizadas en la misma escala [0,1]",
-        xaxis_title="Tiempo",
-        yaxis_title="Valor normalizado",
+        xaxis_title="Fecha y hora de la lectura",
+        yaxis_title="Valor normalizado (0 = minimo, 1 = maximo)",
         legend=dict(orientation="h", y=1.1),
         height=350,
     )
     st.plotly_chart(fig_norm, width="stretch")
 
-    st.subheader("Resumen diario")
+    # ── Resumen diario ────────────────────────────────────────────────────────
+    st.subheader("Resumen por dia")
+    st.caption(
+        "Agrupa todas las lecturas por dia y muestra el promedio y la variabilidad (desviacion estandar) "
+        "de temperatura y humedad. Util para comparar el comportamiento ambiental entre diferentes dias."
+    )
     if df_dia.empty:
-        st.info("Aun no hay datos de dias completos.")
+        st.info("Aun no hay datos de dias completos. Esta tabla se llenara despues de 24 horas de medicion continua.")
     else:
         st.dataframe(
             df_dia.rename(columns={
-                "periodo": "Dia",
-                "temp_prom": "Temp prom (C)",
-                "temp_min": "Temp min (C)",
-                "temp_max": "Temp max (C)",
-                "hum_prom": "Hum prom (%)",
-                "n": "N lecturas",
+                "periodo": "Fecha",
+                "temp_prom": "Temp. promedio (°C)",
+                "temp_min": "Temp. minima (°C)",
+                "temp_max": "Temp. maxima (°C)",
+                "hum_prom": "Humedad prom. (%)",
+                "n": "Num. lecturas",
             }),
             width="stretch",
             hide_index=True,
         )
 
-# ── Auto-refresco ─────────────────────────────────────────────────────────────
+# ── Pie de pagina ─────────────────────────────────────────────────────────────
 
 st.divider()
 st.caption(
-    f"Refrescando cada {refresco} s. "
-    "Para despliegue en la nube ver: https://streamlit.io/cloud"
+    f"Pantalla actualizada cada {refresco} segundos automaticamente. "
+    "Para publicar este dashboard en internet ver: https://streamlit.io/cloud"
 )
 
 time.sleep(refresco)
