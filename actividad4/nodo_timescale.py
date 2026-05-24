@@ -1,33 +1,52 @@
 """
 Actividad 4 — Almacenamiento IoT en TimescaleDB Cloud (Tiger Cloud).
 
-Flujo independiente de las actividades anteriores:
+Flujo independiente:
   CounterFit (DHT11 virtual) o --simulate
-      → nodo_timescale.py
-          → TimescaleDB Cloud  (hypertable lecturas_iot)
+      -> nodo_timescale.py
+          -> TimescaleDB Cloud (hypertable lecturas_iot)
 
-Credenciales en .env:
+Credenciales en .env (raiz del proyecto):
   TS_HOST, TS_PORT, TS_DB, TS_USER, TS_PASSWORD
 
-Uso rápido (simulado):
+Uso rapido (simulado, sin CounterFit):
   python nodo_timescale.py --simulate --samples 20 --interval-sec 5
 
-Prueba con CounterFit (3 horas):
-  python nodo_timescale.py --interval-sec 30 --samples 360
+Con CounterFit activo en puerto 5050 (3 horas):
+  python nodo_timescale.py --port 5050 --interval-sec 30 --samples 360
 """
 
 import argparse
 import os
+import random
 import sys
 import time
 from datetime import datetime, timezone
+from typing import Optional, Tuple
 
 from dotenv import load_dotenv
-
-from nodo_sensor import read_humidity_temperature, read_simulated_pair
-
 import psycopg2
-from psycopg2.extras import execute_values
+
+# ── Helpers de sensor (auto-contenidos en este modulo) ────────────────────────
+
+def read_simulated_pair() -> Tuple[float, float]:
+    """Temperatura y humedad plausibles sin CounterFit."""
+    temp_c = max(17.5, min(34.5, random.gauss(23.8, 1.8)))
+    hum_pct = max(34.0, min(93.0, random.gauss(59.5, 5.5)))
+    return round(hum_pct, 2), round(temp_c, 2)
+
+
+def read_humidity_temperature(sensor, retries: int = 5) -> Tuple[float, float]:
+    last_err: Optional[Exception] = None
+    for _ in range(retries):
+        try:
+            hum, temp = sensor.read()
+            return float(hum), float(temp)
+        except Exception as e:
+            last_err = e
+            time.sleep(1)
+    raise RuntimeError(f"Lectura DHT virtual fallida tras {retries} intentos") from last_err
+
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
 
@@ -40,9 +59,7 @@ CREATE TABLE IF NOT EXISTS lecturas_iot (
 );
 """
 
-HYPERTABLE_SQL = """
-SELECT create_hypertable('lecturas_iot', 'ts', if_not_exists => TRUE);
-"""
+HYPERTABLE_SQL = "SELECT create_hypertable('lecturas_iot', 'ts', if_not_exists => TRUE);"
 
 INSERT_SQL = """
 INSERT INTO lecturas_iot (ts, temperatura_c, humedad_pct, fuente)
@@ -50,7 +67,7 @@ VALUES (%s, %s, %s, %s);
 """
 
 
-# ── Conexión ──────────────────────────────────────────────────────────────────
+# ── Conexion ──────────────────────────────────────────────────────────────────
 
 def get_connection() -> psycopg2.extensions.connection:
     return psycopg2.connect(
@@ -71,7 +88,7 @@ def ensure_schema(conn) -> None:
         try:
             cur.execute(HYPERTABLE_SQL)
         except Exception:
-            pass  # ya existe como hypertable
+            pass
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_lecturas_iot_ts ON lecturas_iot (ts DESC);"
         )
@@ -82,16 +99,16 @@ def ensure_schema(conn) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Nodo IoT Actividad 4: CounterFit → TimescaleDB Cloud.",
+        description="Actividad 4: CounterFit -> TimescaleDB Cloud.",
         epilog=(
             "Ejemplos:\n"
             "  python nodo_timescale.py --simulate --samples 20 --interval-sec 5\n"
-            "  python nodo_timescale.py --interval-sec 30 --samples 360"
+            "  python nodo_timescale.py --port 5050 --interval-sec 30 --samples 360"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--simulate", action="store_true",
-                   help="Generar valores sintéticos sin CounterFit")
+                   help="Generar valores sinteticos sin CounterFit")
     p.add_argument("--host", default="127.0.0.1",
                    help="Host de CounterFit (ignorado con --simulate)")
     p.add_argument("--port", type=int, default=5000,
@@ -101,7 +118,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--interval-sec", type=int, default=30,
                    help="Segundos entre muestras")
     p.add_argument("--samples", type=int, default=360,
-                   help="Número total de lecturas")
+                   help="Numero total de lecturas")
     p.add_argument("--no-progress", action="store_true",
                    help="Desactiva la barra tqdm")
     return p.parse_args()
@@ -111,7 +128,6 @@ def parse_args() -> argparse.Namespace:
 
 def run(reader, args: argparse.Namespace, conn) -> None:
     fuente = "simulate" if args.simulate else "counterfit"
-
     print(
         f"Inicio Actividad 4: {args.samples} muestras cada {args.interval_sec}s"
         f" -> TimescaleDB Cloud (lecturas_iot) | fuente={fuente}",
@@ -128,28 +144,19 @@ def run(reader, args: argparse.Namespace, conn) -> None:
     if not args.no_progress:
         try:
             from tqdm import tqdm
-            pbar = tqdm(
-                sample_range,
-                total=args.samples,
-                desc="IoT→TimescaleDB",
-                unit="muestra",
-                dynamic_ncols=True,
-                file=sys.stdout,
-            )
+            pbar = tqdm(sample_range, total=args.samples, desc="IoT->TimescaleDB",
+                        unit="muestra", dynamic_ncols=True, file=sys.stdout)
             log_fn = tqdm.write
         except ImportError:
             pbar = None
 
     loop = pbar if pbar is not None else sample_range
-
     with conn.cursor() as cur:
         for i in loop:
             hum, temp = reader()
             ts = datetime.now(tz=timezone.utc)
-
             cur.execute(INSERT_SQL, (ts, temp, hum, fuente))
             conn.commit()
-
             line = (
                 f"[{i}/{args.samples}] {ts.strftime('%Y-%m-%dT%H:%M:%SZ')}  "
                 f"T={temp:.2f}C  HR={hum:.2f}%  -> TimescaleDB OK"
@@ -157,27 +164,25 @@ def run(reader, args: argparse.Namespace, conn) -> None:
             log_fn(line)
             if pbar is not None:
                 pbar.set_postfix(T=f"{temp:.1f}", HR=f"{hum:.1f}")
-
             if i < args.samples:
                 time.sleep(args.interval_sec)
 
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM lecturas_iot;")
         total = cur.fetchone()[0]
-
     print(f"\nTotal acumulado en lecturas_iot: {total} filas.", flush=True)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> int:
-    load_dotenv()
+    load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
     args = parse_args()
 
     for var in ("TS_HOST", "TS_PASSWORD"):
         if not os.environ.get(var):
             print(
-                f"ERROR: variable {var} no encontrada. Completa el archivo .env",
+                f"ERROR: variable {var} no encontrada. Completa el archivo .env en la raiz del proyecto.",
                 file=sys.stderr,
             )
             return 1
@@ -188,7 +193,7 @@ def main() -> int:
     print("Esquema verificado.", flush=True)
 
     if args.simulate:
-        print("Modo --simulate activo (valores sintéticos).", flush=True)
+        print("Modo --simulate activo (valores sinteticos).", flush=True)
         run(read_simulated_pair, args, conn)
         conn.close()
         return 0

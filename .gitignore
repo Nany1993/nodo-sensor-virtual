@@ -29,5 +29,13 @@ Estructura_Informe_Practica.md
 # Capturas de pantalla del escritorio (evidencia local)
 *.png
 
+# Videos (demasiado grandes para GitHub)
+*.mp4
+*.mov
+*.avi
+
+# Presentaciones locales
+*.pptx
+
 # Jupyter checkpoints
 .ipynb_checkpoints/
