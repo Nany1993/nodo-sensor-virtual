@@ -20,9 +20,9 @@ import time
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import psycopg2
 import streamlit as st
 from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
 
 # ── Configuracion de página ───────────────────────────────────────────────────
 
@@ -39,22 +39,19 @@ load_dotenv()
 
 @st.cache_resource
 def get_engine():
-    """Pool de conexiones reutilizable (Streamlit lo cachea entre reruns)."""
-    return dict(
-        host=os.environ["TS_HOST"],
-        port=int(os.environ.get("TS_PORT", 33711)),
-        dbname=os.environ.get("TS_DB", "tsdb"),
-        user=os.environ.get("TS_USER", "tsdbadmin"),
-        password=os.environ["TS_PASSWORD"],
-        sslmode="require",
-        connect_timeout=15,
-    )
+    """Motor SQLAlchemy reutilizable (Streamlit lo cachea entre reruns)."""
+    host     = os.environ["TS_HOST"]
+    port     = int(os.environ.get("TS_PORT", 33711))
+    db       = os.environ.get("TS_DB", "tsdb")
+    user     = os.environ.get("TS_USER", "tsdbadmin")
+    password = os.environ["TS_PASSWORD"]
+    url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}?sslmode=require"
+    return create_engine(url, pool_pre_ping=True, connect_args={"connect_timeout": 15})
 
 
-def query(sql: str, params=None) -> pd.DataFrame:
-    conn_params = get_engine()
-    with psycopg2.connect(**conn_params) as conn:
-        return pd.read_sql_query(sql, conn, params=params)
+def query(sql: str) -> pd.DataFrame:
+    with get_engine().connect() as conn:
+        return pd.read_sql_query(text(sql), conn)
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -219,7 +216,7 @@ with tab1:
             "humedad_pct": "Humedad (%)",
             "fuente": "Fuente",
         }),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -245,7 +242,7 @@ with tab1:
         legend=dict(orientation="h", y=1.1),
         height=380,
     )
-    st.plotly_chart(fig_live, use_container_width=True)
+    st.plotly_chart(fig_live, width="stretch")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 2 — ANALISIS EXPLORATORIO
@@ -271,7 +268,7 @@ with tab2:
         legend=dict(orientation="h", y=1.1),
         height=400,
     )
-    st.plotly_chart(fig_ts, use_container_width=True)
+    st.plotly_chart(fig_ts, width="stretch")
 
     col_h1, col_h2 = st.columns(2)
     with col_h1:
@@ -281,7 +278,7 @@ with tab2:
             labels={"temperatura_c": "Temperatura (C)"},
             color_discrete_sequence=["#e94560"],
         )
-        st.plotly_chart(fig_ht, use_container_width=True)
+        st.plotly_chart(fig_ht, width="stretch")
     with col_h2:
         fig_hh = px.histogram(
             df, x="humedad_pct", nbins=20,
@@ -289,7 +286,7 @@ with tab2:
             labels={"humedad_pct": "Humedad (%)"},
             color_discrete_sequence=["#4a90e2"],
         )
-        st.plotly_chart(fig_hh, use_container_width=True)
+        st.plotly_chart(fig_hh, width="stretch")
 
     st.subheader("Estadisticas descriptivas")
     stats = (
@@ -298,7 +295,7 @@ with tab2:
         .round(3)
         .rename(columns={"temperatura_c": "Temperatura (C)", "humedad_pct": "Humedad (%)"})
     )
-    st.dataframe(stats, use_container_width=True)
+    st.dataframe(stats, width="stretch")
 
     st.subheader("Lecturas en condicion de alerta")
     df_alertas = df[(df["temperatura_c"] > t_alerta) | (df["humedad_pct"] > h_alerta)].copy()
@@ -312,7 +309,7 @@ with tab2:
                 "temperatura_c": "Temp (C)",
                 "humedad_pct": "Humedad (%)",
             }),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -353,7 +350,7 @@ with tab3:
         legend=dict(orientation="h", y=1.12),
         height=420,
     )
-    st.plotly_chart(fig_ma, use_container_width=True)
+    st.plotly_chart(fig_ma, width="stretch")
 
     st.subheader("Agregados por hora — time_bucket() en TimescaleDB")
     if df_hora.empty:
@@ -383,7 +380,7 @@ with tab3:
             legend=dict(orientation="h", y=1.1),
             height=380,
         )
-        st.plotly_chart(fig_bucket, use_container_width=True)
+        st.plotly_chart(fig_bucket, width="stretch")
 
         st.dataframe(
             df_hora.rename(columns={
@@ -394,7 +391,7 @@ with tab3:
                 "hum_prom": "Hum prom (%)",
                 "n": "N lecturas",
             }),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -423,7 +420,7 @@ with tab3:
         legend=dict(orientation="h", y=1.1),
         height=350,
     )
-    st.plotly_chart(fig_norm, use_container_width=True)
+    st.plotly_chart(fig_norm, width="stretch")
 
     st.subheader("Resumen diario")
     if df_dia.empty:
@@ -438,7 +435,7 @@ with tab3:
                 "hum_prom": "Hum prom (%)",
                 "n": "N lecturas",
             }),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
