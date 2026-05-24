@@ -51,18 +51,20 @@ La infraestructura elegida es **TimescaleDB Cloud (Tiger Cloud)**, una extensió
 
 La selección de TimescaleDB como infraestructura de almacenamiento respondió a criterios técnicos alineados con las características propias de los datos IoT:
 
-**Criterios de evaluación:**
+**Comparación de infraestructuras evaluadas:**
 
-| Criterio | Base de datos relacional tradicional | TimescaleDB Cloud |
-|---|---|---|
-| Tipo | Tabla plana (ej. SQLite, MySQL) | PostgreSQL + extensión time-series |
-| Escalabilidad | Degradación al superar ~1 M filas | Miles de millones de filas sin degradación |
-| Compresión automática | No | Sí, hasta 90% en datos históricos |
-| Funciones time-series | Requieren lógica en el cliente | `time_bucket()`, `first()`, `last()`, `histogram()` nativos |
-| Agregados continuos | No | Sí (Continuous Aggregates en background) |
-| Políticas de retención | No | Sí (drop chunks automático) |
-| Acceso remoto | Limitado | Nativo vía PostgreSQL estándar |
-| Costo | Gratuito | Gratuito (plan básico / trial) |
+| Criterio | BD relacional tradicional | TimescaleDB Cloud | Relevancia para IoT |
+|---|:---:|:---:|---|
+| Escalabilidad de escrituras | ⚠️ Degrada > 1 M filas | ✅ Miles de millones | Alta — escritura continua cada 30 s |
+| Consultas por rango de tiempo | 🔴 Escaneo completo | ✅ Solo chunk relevante | Crítica — todas las consultas son temporales |
+| Funciones time-series nativas | ❌ No disponibles | ✅ `time_bucket()`, `first()`, `last()` | Alta — agrupamiento horario/diario en el servidor |
+| Agregados continuos automáticos | ❌ No | ✅ En background | Media — vistas precalculadas sin código extra |
+| Compresión de datos históricos | ❌ No | ✅ Hasta 90 % | Media — reduce costos de almacenamiento |
+| Políticas de retención | ❌ Manual | ✅ Drop chunks automático | Media — gestión del ciclo de vida del dato |
+| Acceso remoto | ⚠️ Limitado / archivo local | ✅ PostgreSQL estándar (SSL) | Alta — nodo sensor y dashboard en equipos distintos |
+| Costo de adopción | ✅ Gratuito | ✅ Plan básico gratuito | — |
+
+> **Decisión:** TimescaleDB Cloud fue seleccionado porque su modelo de **hypertable particionada por tiempo** resuelve de forma nativa los tres requisitos principales de un sistema IoT: escritura de alta frecuencia, consultas eficientes sobre ventanas temporales y acceso remoto desde múltiples clientes.
 
 **Justificación de la selección:** TimescaleDB organiza los datos en una **hypertable**, que es una tabla PostgreSQL particionada automáticamente por intervalos de tiempo (chunks). Cada chunk almacena un rango temporal de datos (por defecto 7 días) y puede comprimirse de forma independiente. Esta arquitectura permite que las consultas de rangos temporales escaneen únicamente los chunks relevantes, reduciendo drásticamente el tiempo de respuesta.
 
