@@ -273,6 +273,75 @@ La arquitectura de la Actividad 4 representa el patrón de producción recomenda
 
 ---
 
+## 6. Dashboard en tiempo real con Streamlit
+
+### 6.1 Descripción del componente
+
+Como extensión del pipeline de procesamiento, se implementó un dashboard interactivo usando **Streamlit** (`dashboard_iot.py`) que se conecta directamente a la hypertable `lecturas_iot` en TimescaleDB Cloud y visualiza los datos en tiempo real con auto-refresco configurable.
+
+El dashboard organiza la información en tres pestanas:
+
+| Pestana | Contenido |
+|---|---|
+| **Datos en vivo** | Métricas de la última lectura (T, HR, timestamp), tabla de las últimas 20 muestras, minigráfica en vivo (últimas 50 lecturas), alertas activas |
+| **Análisis exploratorio** | Serie temporal completa (datos crudos), histogramas de distribución, estadísticas descriptivas, tabla de alertas por umbral |
+| **Datos procesados** | Promedio móvil con ventana configurable (slider), agregados horarios con `time_bucket()`, variables normalizadas [0,1] comparadas, resumen diario |
+
+El sidebar permite ajustar en vivo: frecuencia de refresco (10/30/60/120 s), ventana del promedio móvil (3–20 muestras) y umbrales de alerta de temperatura y humedad.
+
+### 6.2 Ejecución local
+
+```bash
+# Terminal 1: captura continua de datos
+python nodo_timescale.py --simulate --interval-sec 10 --samples 500
+
+# Terminal 2: dashboard
+streamlit run dashboard_iot.py
+```
+
+El navegador abre automáticamente en `http://localhost:8501`. El dashboard se refresca solo cada N segundos sin necesidad de recargar la página.
+
+### 6.3 Despliegue en la nube (Streamlit Cloud)
+
+Para hacer el dashboard accesible desde cualquier navegador sin instalar nada, se puede publicar gratuitamente en **Streamlit Community Cloud** (https://streamlit.io/cloud):
+
+**Pasos:**
+
+1. Subir el repositorio a GitHub (ya está en https://github.com/Nany1993/nodo-sensor-virtual).
+
+2. Crear el archivo `.streamlit/secrets.toml` **en el panel de Streamlit Cloud** (nunca en el repositorio):
+
+```toml
+TS_HOST     = "lhlr0l8iz2.pdrh23iqv2.tsdb.cloud.timescale.com"
+TS_PORT     = "33711"
+TS_DB       = "tsdb"
+TS_USER     = "tsdbadmin"
+TS_PASSWORD = "tu_password"
+```
+
+3. Modificar `dashboard_iot.py` para leer de `st.secrets` en producción:
+
+```python
+# En la nube usa st.secrets; localmente carga desde .env
+import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
+
+TS_HOST = st.secrets.get("TS_HOST", os.environ.get("TS_HOST"))
+```
+
+4. En el panel de Streamlit Cloud: *New app* → seleccionar repositorio → seleccionar `dashboard_iot.py` → Deploy.
+
+La URL resultante (`https://usuario.streamlit.app`) es accesible desde cualquier dispositivo con navegador, sin abrir puertos ni configurar servidores.
+
+**Ventajas del despliegue cloud:**
+- El dashboard queda disponible 24/7 mientras el nodo sensor esté capturando datos hacia TimescaleDB.
+- Múltiples usuarios pueden consultar el dashboard simultáneamente.
+- No requiere que el PC esté encendido para visualizar (los datos ya están en TimescaleDB Cloud).
+
+---
+
 ## Referencias
 
 - Timescale Inc. (2026). *TimescaleDB Documentation*. https://docs.timescale.com  
