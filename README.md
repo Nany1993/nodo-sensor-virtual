@@ -9,19 +9,20 @@
 
 ## Descripcion del proyecto
 
-Proyecto de desarrollo progresivo de un sistema IoT completo. Partiendo de un nodo sensor virtual, cada actividad agrega una capa de complejidad: captura local, transmision a la nube, almacenamiento en serie de tiempo y visualizacion en tiempo real.
+Proyecto de desarrollo progresivo de un sistema IoT completo. Partiendo de un nodo sensor virtual, cada actividad agrega una capa de complejidad: captura local, transmision a la nube, almacenamiento en serie de tiempo, visualizacion en tiempo real y analitica basica.
 
 ```
-Actividad 1         Actividad 2 / 3              Actividad 4
------------         ---------------              -----------
-CounterFit          CounterFit                   CounterFit
-    |                   |                            |
-nodo_sensor.py      nodo_mqtt.py              nodo_timescale.py
-    |               /        \                       |
-SQLite         SQLite    Adafruit IO         TimescaleDB Cloud
-                         (MQTT)                      |
-                                              dashboard_iot.py
-                                              (Streamlit :8501)
+Actividad 1         Actividad 2 / 3              Actividad 4                 Actividad 5
+-----------         ---------------              -----------                 -----------
+CounterFit          CounterFit                   CounterFit                  CounterFit
+    |                   |                            |                            |
+nodo_sensor.py      nodo_mqtt.py              nodo_timescale.py           nodo_timescale.py
+    |               /        \                       |                            |
+SQLite         SQLite    Adafruit IO         TimescaleDB Cloud          TimescaleDB Cloud
+                         (MQTT)                      |                            |
+                                              dashboard_iot.py            dashboard_iot.py
+                                              (Streamlit :8501)           + correlacion/dispersion
+                                                                          (refresh 30 s)
 ```
 
 ---
@@ -48,9 +49,15 @@ nodo-sensor-virtual/
 |-- actividad4/              Actividad 4: TimescaleDB Cloud + Streamlit
 |   |-- nodo_timescale.py    Script de captura -> TimescaleDB
 |   |-- dashboard_iot.py     Dashboard interactivo (Streamlit)
+|   |-- activar_flujo.ps1    Arranque rapido del pipeline
+|   |-- sembrar_datos_mayo.py  Datos de prueba para filtros
 |   |-- Procesamiento_Datos_IoT.ipynb  Pipeline de procesamiento
 |   |-- Informe_Actividad4.md  Informe de practica
 |   └-- Resumen_Actividad4_TimescaleDB.ipynb  Resumen para el docente
+|
+|-- actividad5/              Actividad 5: Visualizacion tiempo real + analitica
+|   |-- Informe_Actividad5_Visualizacion.md  Informe de la fase
+|   └-- activar_flujo.ps1    Arranque del flujo completo (3 terminales)
 |
 |-- requirements.txt         Dependencias Python de todo el proyecto
 |-- .env.example             Plantilla de credenciales
@@ -175,22 +182,25 @@ Abre tres terminales simultaneas:
 # Terminal 1: iniciar CounterFit
 .venv\Scripts\counterfit --port 5050
 
-# Terminal 2: capturar datos hacia TimescaleDB
-.venv\Scripts\python actividad4/nodo_timescale.py --port 5050 --interval-sec 30 --samples 360
+# Terminal 2: capturar datos hacia TimescaleDB (cada 5 s, 2 horas)
+.venv\Scripts\python actividad4/nodo_timescale.py --port 5050 --interval-sec 5 --samples 1440
 
-# Terminal 3: abrir el dashboard
+# Terminal 3: abrir el dashboard (pide usuario y contraseña)
 .venv\Scripts\streamlit run actividad4/dashboard_iot.py
+```
+
+Credenciales del login en `.env`:
+
+```
+DASHBOARD_USER=admin
+DASHBOARD_PASSWORD=admin
 ```
 
 El dashboard abre en `http://localhost:8501` y se refresca automaticamente cada 30 segundos.
 
-### Pestanas del dashboard
+### Pestanas del dashboard (Actividad 4 base)
 
-| Pestana | Contenido |
-|---------|-----------|
-| Datos en vivo | Ultima lectura, tabla de las 20 mas recientes, grafica en tiempo real, alertas |
-| Analisis exploratorio | Serie temporal completa, histogramas, estadisticas descriptivas |
-| Datos procesados | Promedio movil, agregados por hora (time_bucket), normalizacion min-max |
+Ver **Actividad 5** para la version actual con correlacion, dispersion y filtros avanzados.
 
 ### Procesamiento de datos
 
@@ -203,6 +213,40 @@ El notebook implementa el pipeline completo:
 1. **Preprocesamiento:** deteccion de nulos, duplicados y anomalias de rango
 2. **Filtrado:** ventana temporal, umbral de alerta, `time_bucket()` nativo de TimescaleDB
 3. **Transformacion:** promedio movil, normalizacion min-max, agregados horarios y diarios
+
+---
+
+## Actividad 5 — Visualizacion en tiempo real y analitica basica
+
+**Objetivo:** Dashboard interactivo con datos casi en tiempo real, filtros temporales, correlacion, dispersion y estadisticas descriptivas.
+
+**Tecnologias:** Streamlit, Plotly, TimescaleDB Cloud, pandas
+
+**Carpeta:** `actividad5/` (informe y arranque) · dashboard en `actividad4/dashboard_iot.py`
+
+### Arranque rapido
+
+```powershell
+.\actividad5\activar_flujo.ps1
+```
+
+Abre CounterFit, captura cada **5 s** hacia TimescaleDB y el dashboard en `http://localhost:8501` (refresh automatico cada **30 s**).
+
+### Pestanas del dashboard
+
+| Pestana | Contenido |
+|---------|-----------|
+| En vivo (ultimas) | Metricas y serie temporal de las ultimas 120 lecturas |
+| Datos filtrados | Serie temporal, metricas y tabla segun filtros del sidebar |
+| Estadisticas | Pearson, Spearman, dispersion T vs HR, histogramas, `describe()` |
+
+### Filtros del sidebar
+
+- Ano (select)
+- Mes (multiselect)
+- Dia (multiselect)
+- Hora (select)
+- Botones: Limpiar filtros, Actualizar ahora
 
 ---
 

@@ -229,7 +229,7 @@ def parse_args() -> argparse.Namespace:
         epilog=(
             "Ejemplos:\n"
             "  python nodo_timescale.py --simulate --samples 20 --interval-sec 5\n"
-            "  python nodo_timescale.py --port 5050 --interval-sec 30 --samples 360"
+            "  python nodo_timescale.py --port 5050 --interval-sec 10 --samples 360"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -241,10 +241,10 @@ def parse_args() -> argparse.Namespace:
                    help="Puerto HTTP de CounterFit")
     p.add_argument("--dht-pin", type=int, default=5,
                    help="Pin de humedad en CounterFit")
-    p.add_argument("--interval-sec", type=int, default=30,
+    p.add_argument("--interval-sec", type=int, default=5,
                    help="Segundos entre muestras")
-    p.add_argument("--samples", type=int, default=360,
-                   help="Numero total de lecturas intentadas")
+    p.add_argument("--samples", type=int, default=1440,
+                   help="Numero total de lecturas intentadas (1440 = 2 h cada 5 s)")
     p.add_argument("--no-progress", action="store_true",
                    help="Desactiva la barra tqdm")
     return p.parse_args()

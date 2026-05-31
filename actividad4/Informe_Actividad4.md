@@ -378,6 +378,8 @@ TS_PORT     = "33711"
 TS_DB       = "tsdb"
 TS_USER     = "tsdbadmin"
 TS_PASSWORD = "tu_password"
+DASHBOARD_USER     = "admin"
+DASHBOARD_PASSWORD = "tu_contraseña_segura"
 ```
 
 3. Modificar `dashboard_iot.py` para leer de `st.secrets` en producción:
