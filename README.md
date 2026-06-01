@@ -56,8 +56,9 @@ nodo-sensor-virtual/
 |   └-- Resumen_Actividad4_TimescaleDB.ipynb  Resumen para el docente
 |
 |-- actividad5/              Actividad 5: Visualizacion tiempo real + analitica
+|   |-- Informe_Unidad3_Seguridad_Analitica.ipynb  Entregable Unidad 3 (informe + video)
+|   |-- Informe_Unidad3_Seguridad_Analitica.md  Fuente del informe
 |   |-- Informe_Actividad5_Visualizacion.md  Informe del panel y graficos
-|   |-- Informe_Unidad3_Seguridad_Analitica.md  Informe Unidad 3 (seguridad + analitica)
 |   └-- activar_flujo.ps1    Arranque del flujo completo (3 terminales)
 |
 |-- requirements.txt         Dependencias Python de todo el proyecto
@@ -249,11 +250,16 @@ Abre CounterFit, captura cada **5 s** hacia TimescaleDB y el dashboard en `http:
 - Hora (select)
 - Botones: Limpiar filtros, Actualizar ahora
 
-### Informe Unidad 3
+### Informe Unidad 3 (entregable)
 
-Documento de cierre de la unidad (seguridad, Ley 1581, analitica y panel):
+Notebook con informe, video explicativo y enlace al repositorio:
 
-`actividad5/Informe_Unidad3_Seguridad_Analitica.md`
+`actividad5/Informe_Unidad3_Seguridad_Analitica.ipynb`
+
+- Video: https://youtu.be/-VxEoZx7cU8
+- Repositorio: https://github.com/Nany1993/nodo-sensor-virtual
+
+Fuente en Markdown: `actividad5/Informe_Unidad3_Seguridad_Analitica.md`
 
 ---
 
